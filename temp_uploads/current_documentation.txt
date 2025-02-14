@@ -1,0 +1,54 @@
+# UiPath Workflow Documentation
+
+## Overview
+This UiPath workflow, defined in the XAML code provided, is designed to orchestrate a series of tasks involving data retrieval and processing. The workflow consists of a main sequence that invokes two other workflows: `GetData.xaml` and `ProcessData.xaml`. The primary purpose of this workflow is to manage user data by retrieving it from a source and then processing that data for further use.
+
+## Libraries and Packages Used
+The following libraries and packages are referenced in the workflow:
+
+1. **System.Activities**: Provides the core functionalities for creating workflows.
+2. **Microsoft.VisualBasic**: Allows the use of Visual Basic expressions and activities.
+3. **UiPath.System.Activities**: Contains core activities for UiPath workflows.
+4. **UiPath.UiAutomation.Activities**: Provides activities for automating UI interactions.
+5. **UiPath.Excel.Activities**: Contains activities for working with Excel files.
+6. **System.Data**: Provides classes for handling data in a structured way, including DataTables.
+7. **NPOI**: A library for reading and writing Excel files in .NET applications.
+
+## Workflow Structure
+The workflow is structured as follows:
+
+### Main Sequence
+- **Display Name**: Main Sequence
+- **Variables**:
+  - `dt_UserData`: A DataTable variable intended to store user data retrieved from the `GetData.xaml` workflow.
+  - `dt_UserData2`: A DataTable variable used to hold the output from the `GetData.xaml` workflow and serve as input for the `ProcessData.xaml` workflow.
+
+### Activities
+1. **InvokeWorkflowFile (GetData.xaml)**:
+   - **Display Name**: GetData.xaml - Invoke Workflow File
+   - **Purpose**: This activity calls the `GetData.xaml` workflow to retrieve user data.
+   - **Arguments**:
+     - **Out Argument**: `out_dt_UserData`
+       - **Type**: DataTable
+       - **Value**: `dt_UserData2`
+       - **Description**: This argument captures the output DataTable from the `GetData.xaml` workflow and assigns it to `dt_UserData2`.
+
+2. **InvokeWorkflowFile (ProcessData.xaml)**:
+   - **Display Name**: ProcessData.xaml - Invoke Workflow File
+   - **Purpose**: This activity calls the `ProcessData.xaml` workflow to process the user data retrieved.
+   - **Arguments**:
+     - **In Argument**: `in_dt_UserData`
+       - **Type**: DataTable
+       - **Value**: `dt_UserData2`
+       - **Description**: This argument passes the DataTable `dt_UserData2` (output from `GetData.xaml`) as input to the `ProcessData.xaml` workflow.
+
+## Expected Inputs and Outputs
+- **Input**:
+  - The workflow does not specify direct inputs; however, it relies on the `GetData.xaml` workflow to provide user data, which is expected to be in a DataTable format.
+
+- **Output**:
+  - The output of the `GetData.xaml` workflow is stored in the `dt_UserData2` DataTable variable.
+  - The `ProcessData.xaml` workflow processes this DataTable, but the specifics of the output are not defined in the provided XAML.
+
+## Conclusion
+This workflow serves as a controller that manages the flow of data between two separate workflows, facilitating the retrieval and processing of user data. The use of DataTable variables allows for structured data handling, and the invocation of other workflows promotes modular design and reusability.

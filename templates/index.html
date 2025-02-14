@@ -12,6 +12,7 @@
   <h1>LLM4Reuse - Upload</h1>
   <p style="text-align:center;">Drag & drop XAML files here or click to select.</p>
   <div id="uploadArea" class="upload-area">Drop or Click</div>
+  <div id="loadingSpinner" class="loading-spinner"></div>
   <input id="fileInput" type="file" name="files" multiple style="display:none;">
 </div>
 
@@ -56,6 +57,8 @@
   const promptInput = document.getElementById('promptInput');
   const sendPromptBtn = document.getElementById('sendPromptBtn');
 
+  const loadingSpinner = document.getElementById('loadingSpinner');
+
   uploadArea.addEventListener('dragover', (e) => {
     e.preventDefault();
     uploadArea.classList.add('hover');
@@ -86,26 +89,44 @@
     for(let i=0; i<files.length; i++){
       formData.append('files', files[i]);
     }
-    fetch('/', {
-      method: 'POST',
-      body: formData
-    })
-    .then(res => res.json())
-    .then(data => {
-      if(data.status === "ok") {
-        uploadContainer.classList.add('hidden');
-        editorContainer.classList.remove('hidden');
 
-        xamlBox.textContent = data.xaml_code || "";
-        documentationBox.textContent = data.documentation || "";
+    // Show loading spinner
+    loadingSpinner.style.display = 'block';
+    uploadArea.style.display = 'none';
+
+    const xhr = new XMLHttpRequest();
+
+    xhr.onload = function() {
+      if (xhr.status === 200) {
+        const data = JSON.parse(xhr.responseText);
+        if(data.status === "ok") {
+          setTimeout(() => {
+            uploadContainer.classList.add('hidden');
+            editorContainer.classList.remove('hidden');
+            xamlBox.textContent = data.xaml_code || "";
+            documentationBox.textContent = data.documentation || "";
+          }, 1000);
+        } else {
+          resetUploadUI();
+        }
       } else {
-        alert("Upload failed.");
+        resetUploadUI();
       }
-    })
-    .catch(err => {
-      console.error(err);
-      alert("Upload error");
-    });
+    };
+
+    xhr.onerror = function() {
+      resetUploadUI();
+    };
+
+    xhr.open('POST', '/', true);
+    xhr.send(formData);
+  }
+
+  function resetUploadUI() {
+    setTimeout(() => {
+      loadingSpinner.style.display = 'none';
+      uploadArea.style.display = 'block';
+    }, 2000);
   }
 
   sendPromptBtn.addEventListener('click', async () => {
