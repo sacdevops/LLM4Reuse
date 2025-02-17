@@ -2,12 +2,13 @@ import os
 import openai
 from flask import Flask, request, render_template, jsonify, send_file
 import shutil
-import io
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+UPLOAD_FOLDER = os.path.join(BASE_DIR, "temp_uploads")
 
 app = Flask(__name__)
 app.secret_key = "some-secret-key"
 
-UPLOAD_FOLDER = "LLM4Reuse/temp_uploads"
 current_xaml_file = os.path.join(UPLOAD_FOLDER, "current_workflow.xaml")
 current_doc_file = os.path.join(UPLOAD_FOLDER, "current_documentation.txt")
 
@@ -74,31 +75,6 @@ def generate_docs_api():
         df.write(new_doc)
     
     return {"documentation": new_doc}
-
-@app.route("/confirm", methods=["POST"])
-def confirm():
-    if not current_xaml_file or not os.path.exists(current_xaml_file):
-        return {"error": "No files to confirm"}, 400
-
-    folder_name = "confirmed_files"
-    if not os.path.exists(folder_name):
-        os.makedirs(folder_name)
-
-    shutil.copy2(current_xaml_file, os.path.join(folder_name, "workflow.xaml"))
-    if current_doc_file and os.path.exists(current_doc_file):
-        shutil.copy2(current_doc_file, os.path.join(folder_name, "documentation.txt"))
-
-    return {"status": "confirmed"}
-
-@app.route("/download_pdf", methods=["GET"])
-def download_pdf():
-    if current_doc_file and os.path.exists(current_doc_file):
-        return send_file(current_doc_file, 
-                        as_attachment=True,
-                        download_name="documentation.txt",
-                        mimetype="text/plain")
-    
-    return "No documentation available", 404
 
 def extend_xaml(current_xaml, user_prompt):
     prompt_text = f"""

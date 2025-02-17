@@ -22,7 +22,6 @@
     <div class="box">
         <div>
             <h3>Documentation</h3>
-            <button class="button" onclick="downloadPDF()">Download PDF</button>
         </div>
       <pre class="white-space-pre" id="documentationBox"></pre>
       <br>
@@ -38,7 +37,6 @@
     <div class="box">
         <div>
             <h3>XAML Code</h3>
-            <button class="button" onclick="downloadXAML()">Download XAML</button>
         </div>
       <pre class="white-space-pre" id="xamlBox"></pre>
     </div>
@@ -90,7 +88,6 @@
       formData.append('files', files[i]);
     }
 
-    // Show loading spinner
     loadingSpinner.style.display = 'block';
     uploadArea.style.display = 'none';
 
@@ -170,14 +167,6 @@
   function disableSend(state){
     sendPromptBtn.disabled = state;
     sendPromptBtn.textContent = state ? "Wait..." : "Send";
-  }
-
-  function downloadPDF(){
-    
-  }
-
-  function confirmHandler(e){
-
   }
 </script>
 
