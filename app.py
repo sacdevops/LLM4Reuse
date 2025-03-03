@@ -1,10 +1,12 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import openai
 import os
 from zipfile import ZipFile
 import io
 import re
 import json
+from xaml_visualizer import render_xaml_visualization
 
 st.set_page_config(page_title="LLM4Reuse", layout="wide", initial_sidebar_state="collapsed")
 
@@ -32,6 +34,10 @@ if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
 if 'processed_input' not in st.session_state:
     st.session_state.processed_input = ""
+if 'user_input' not in st.session_state:
+    st.session_state.user_input = ""
+if 'view_mode' not in st.session_state:
+    st.session_state.view_mode = {}
 
 st.markdown("""
     <style>
@@ -108,9 +114,29 @@ st.markdown("""
     }
     .chat-input {
         margin-top: auto;
+        display: flex;
+        align-items: center;
+        gap: 10px;
     }
     .stChatMessage {
         padding: 0.5rem 0 !important;
+    }
+    .send-button {
+        border-radius: 50%;
+        padding: 0.5rem;
+        background-color: #4CAF50;
+        border: none;
+        color: white;
+        font-size: 1rem;
+        cursor: pointer;
+        width: 40px;
+        height: 40px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .send-button:hover {
+        background-color: #45a049;
     }
     .xaml-header {
         display: flex !important;
@@ -140,16 +166,61 @@ st.markdown("""
         color: #0366d6;
         text-decoration: underline;
     }
+    .stForm [data-testid="stForm"] {
+        border: none !important;
+        padding: 0 !important;
+    }
+    /* Style the send button */
+    button[data-testid="baseButton-secondary"] {
+        background-color: #4CAF50 !important;
+        color: white !important;
+        border-radius: 50% !important;
+        width: 40px !important;
+        height: 40px !important;
+        padding: 0 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        border: none !important;
+    }
+    button[data-testid="baseButton-secondary"]:hover {
+        background-color: #45a049 !important;
+    }
     </style>
+
+    <script>
+    // Prevent Enter key from submitting the form
+    document.addEventListener('DOMContentLoaded', function() {
+        const observer = new MutationObserver((mutations) => {
+            for (const mutation of mutations) {
+                if (mutation.addedNodes.length) {
+                    const inputs = document.querySelectorAll('[data-testid="stTextInput"] input');
+                    inputs.forEach(input => {
+                        if (!input.getAttribute('data-enter-handler')) {
+                            input.setAttribute('data-enter-handler', 'true');
+                            input.addEventListener('keydown', function(e) {
+                                if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    return false;
+                                }
+                            });
+                        }
+                    });
+                }
+            }
+        });
+        
+        observer.observe(document.body, { childList: true, subtree: true });
+    });
+    </script>
 """, unsafe_allow_html=True)
 
-def make_openai_call(prompt: str, custom_max_tokens: int = None, responseJsonFormat: bool = False) -> str:
+def make_openai_call(prompt: str, custom_max_tokens: int = None, responseJsonFormat: bool = False, llm_model: str = None) -> str:
     try:
         response = openai.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=custom_max_tokens or MODEL_CONFIG['max_tokens'],
-            model=MODEL_CONFIG['model'],
-            temperature=MODEL_CONFIG['temperature'],
+            max_completion_tokens=custom_max_tokens or MODEL_CONFIG['max_tokens'],
+            model=MODEL_CONFIG['model'] if llm_model is None else llm_model,
             response_format={"type": "json_object" if responseJsonFormat else "text"}
         )
         return response.choices[0].message.content.strip()
@@ -173,7 +244,8 @@ def generate_combined_docs(xaml_files):
     Rules:
     1. IGNORE standard libraries (System.*, Microsoft.*, UiPath.*, mscorlib)
     2. Write the documentation directly without any comments
-    3. Focus on:
+    3. Write the documentation in a clear and concise manner
+    4. Focus on:
        - Overall workflow purpose and flow
        - File interactions
        - Custom implementations
@@ -182,6 +254,16 @@ def generate_combined_docs(xaml_files):
        - Inputs/outputs
        - and another relevant information based on the xaml code
        - Conclusion
+    5. Format the documentation using proper Markdown syntax:
+       - Use # for main titles, ## for subtitles, ### for section headers
+       - Use * or - for bullet points
+       - Use **bold** and *italic* for emphasis
+       - Use proper headings hierarchy for better readability
+       - Use `code` formatting for property names, activities, or code references
+       - Use > for important notes or highlights
+       - Include horizontal rules (---) to separate major sections
+       - Use emojis where appropriate to enhance readability (📁, 🔄, ✅, etc.)
+    6. Start directly with the Overview section and continue with the rest of the content
 
     XAML content:
     {all_content}
@@ -209,7 +291,7 @@ def handle_input(user_input: str):
         JSON RESPONSE:
         """
         
-        analysis_response = make_openai_call(analysis_prompt, 150, True)
+        analysis_response = make_openai_call(analysis_prompt, 150, True, llm_model="gpt-4o-mini")
         
         try:
             analysis = json.loads(analysis_response)
@@ -287,6 +369,10 @@ def create_download_zip():
     memory_file.seek(0)
     return memory_file
 
+def input_submit():
+    # No longer needed as we'll handle the input directly from st.chat_input
+    pass
+
 def show_main_interface():
     st.markdown('''
     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.5rem;">
@@ -331,19 +417,18 @@ def show_main_interface():
                 st.markdown('</div>', unsafe_allow_html=True)
             
             with st.container():
-                st.markdown('<div class="chat-input">', unsafe_allow_html=True)
-                user_input = st.text_input("User Input", placeholder="Enter your request...", 
-                                        label_visibility="collapsed", key="chat_input")
-                st.markdown('</div>', unsafe_allow_html=True)
+                # Replace form with the built-in chat_input widget
+                user_input = st.chat_input("Type your message here...", key="chat_input")
+                
+                # Process input when submitted
+                if user_input:
+                    st.session_state.user_input = user_input
+                    st.session_state.chat_history.append({"role": "user", "content": user_input})
+                    handle_input(user_input)
+                    st.rerun()
             
             st.markdown('</div>', unsafe_allow_html=True)
-        
-        if user_input and user_input != st.session_state.processed_input:
-            st.session_state.processed_input = user_input
-            st.session_state.chat_history.append({"role": "user", "content": user_input})
-            handle_input(user_input)
-            st.rerun()
-    
+
     with cols[2]:
         row = st.columns([3, 1])
         with row[0]:
@@ -361,14 +446,39 @@ def show_main_interface():
             with tab:
                 st.session_state.active_tab = i
                 
-                # Use standard text_area for all tabs
-                st.text_area(
-                    "",
-                    value=st.session_state.files[i]['content'],
-                    height=650,
-                    key=f"xaml_{i}",
-                    disabled=True
-                )
+                # Create a unique key for each file's view mode
+                file_key = f"view_mode_{i}"
+                
+                # Initialize view mode for this file if not set
+                if file_key not in st.session_state.view_mode:
+                    st.session_state.view_mode[file_key] = "code"
+                
+                # Create toggle button
+                col1, col2 = st.columns([6, 1])
+                with col2:
+                    current_mode = st.session_state.view_mode[file_key]
+                    toggle_text = "🔄 Visual" if current_mode == "code" else "🔄 Code"
+                    
+                    if st.button(toggle_text, key=f"toggle_{i}"):
+                        # Toggle view mode
+                        st.session_state.view_mode[file_key] = "visual" if current_mode == "code" else "code"
+                        st.rerun()
+                
+                # Show the appropriate view based on current mode
+                if st.session_state.view_mode[file_key] == "code":
+                    # Code view - existing functionality
+                    st.text_area(
+                        "",
+                        value=st.session_state.files[i]['content'],
+                        height=650,
+                        key=f"xaml_{i}",
+                        disabled=True
+                    )
+                else:
+                    # Visual view - new functionality
+                    xaml_content = st.session_state.files[i]['content']
+                    html_content = render_xaml_visualization(xaml_content)
+                    components.html(html_content, height=650, scrolling=True)
 
 if not st.session_state.initialized:
     st.title("LLM4Reuse")
