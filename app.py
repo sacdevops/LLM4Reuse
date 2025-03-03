@@ -170,7 +170,6 @@ st.markdown("""
         border: none !important;
         padding: 0 !important;
     }
-    /* Style the send button */
     button[data-testid="baseButton-secondary"] {
         background-color: #4CAF50 !important;
         color: white !important;
@@ -369,10 +368,6 @@ def create_download_zip():
     memory_file.seek(0)
     return memory_file
 
-def input_submit():
-    # No longer needed as we'll handle the input directly from st.chat_input
-    pass
-
 def show_main_interface():
     st.markdown('''
     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.5rem;">
@@ -417,10 +412,8 @@ def show_main_interface():
                 st.markdown('</div>', unsafe_allow_html=True)
             
             with st.container():
-                # Replace form with the built-in chat_input widget
                 user_input = st.chat_input("Type your message here...", key="chat_input")
                 
-                # Process input when submitted
                 if user_input:
                     st.session_state.user_input = user_input
                     st.session_state.chat_history.append({"role": "user", "content": user_input})
@@ -446,27 +439,21 @@ def show_main_interface():
             with tab:
                 st.session_state.active_tab = i
                 
-                # Create a unique key for each file's view mode
                 file_key = f"view_mode_{i}"
                 
-                # Initialize view mode for this file if not set
                 if file_key not in st.session_state.view_mode:
                     st.session_state.view_mode[file_key] = "code"
                 
-                # Create toggle button
-                col1, col2 = st.columns([6, 1])
+                col1, col2 = st.columns([2, 1])
                 with col2:
                     current_mode = st.session_state.view_mode[file_key]
                     toggle_text = "🔄 Visual" if current_mode == "code" else "🔄 Code"
                     
                     if st.button(toggle_text, key=f"toggle_{i}"):
-                        # Toggle view mode
                         st.session_state.view_mode[file_key] = "visual" if current_mode == "code" else "code"
                         st.rerun()
-                
-                # Show the appropriate view based on current mode
+            
                 if st.session_state.view_mode[file_key] == "code":
-                    # Code view - existing functionality
                     st.text_area(
                         "",
                         value=st.session_state.files[i]['content'],
@@ -475,7 +462,6 @@ def show_main_interface():
                         disabled=True
                     )
                 else:
-                    # Visual view - new functionality
                     xaml_content = st.session_state.files[i]['content']
                     html_content = render_xaml_visualization(xaml_content)
                     components.html(html_content, height=650, scrolling=True)

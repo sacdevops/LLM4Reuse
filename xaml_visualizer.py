@@ -1,6 +1,5 @@
 from bs4 import BeautifulSoup
 
-# Component icons mapping
 COMPONENTS = {
     "Assign": "📝",
     "MessageBox": "💬",
@@ -19,23 +18,19 @@ COMPONENTS = {
 }
 
 def get_icon_for_node(node_name):
-    """Get the icon for a specific node type"""
     return COMPONENTS.get(node_name, "🔧")
 
 def parse_xaml_to_dict(xaml_string):
     """Parse XAML string to a Python dictionary"""
     try:
-        # Use BeautifulSoup for more flexible parsing
         soup = BeautifulSoup(xaml_string, 'xml')
         root = soup.find('Activity')
         
         if not root:
             return {"error": "No Activity element found in the XAML"}
         
-        # Find the main sequence
         sequence = root.find('Sequence')
         if not sequence:
-            # If no sequence found, use the activity itself
             sequence = root
             
         return process_node(sequence)
@@ -45,12 +40,10 @@ def parse_xaml_to_dict(xaml_string):
 def process_node(node):
     """Process an XML node and its children into a dictionary"""
     try:
-        # Get node name (remove namespace if present)
         node_name = node.name
         if ':' in node_name:
             node_name = node_name.split(':')[-1]
         
-        # Get display name and annotation
         display_name = node.get('DisplayName', '')
         annotation = None
         
@@ -59,7 +52,6 @@ def process_node(node):
                 annotation = attr_value
                 break
         
-        # Get all attributes (excluding special ones)
         attributes = []
         for attr_name, attr_value in node.attrs.items():
             if (attr_name != 'DisplayName' and 
@@ -69,23 +61,19 @@ def process_node(node):
                 attr_value != '{x:Null}'):
                 attributes.append({"name": attr_name, "value": attr_value})
         
-        # Initialize special properties
         main_attributes = []
         main_args = []
         in_args = []
         out_args = []
         is_unsupported = node_name not in COMPONENTS
         
-        # Get children that aren't special elements
         children = []
         for child in node.find_all(recursive=False):
             if (not child.name.startswith('WorkflowViewStateService.ViewState') and
                 child.name not in ['Variables', 'Sequence.Variables']):
                 children.append(process_node(child))
         
-        # Handle specific node types with special processing
         if node_name == "Assign":
-            # Find Assign.To and Assign.Value
             assign_to = node.find("Assign.To")
             assign_value = node.find("Assign.Value")
             if assign_to:
@@ -138,7 +126,6 @@ def process_node(node):
             main_args.append({"name": "Workflow", "value": workflow_file})
             attributes = [attr for attr in attributes if attr["name"] != "WorkflowFileName"]
             
-            # Process arguments
             args_node = node.find("InvokeWorkflowFile.Arguments")
             if args_node:
                 for arg in args_node.find_all(recursive=False):
@@ -154,7 +141,6 @@ def process_node(node):
         elif node_name == "Click":
             children = []
         
-        # Return structured node data
         return {
             "nodeName": node_name,
             "displayName": display_name,
@@ -175,7 +161,6 @@ def generate_visual_html(node, depth=0):
     try:
         icon = get_icon_for_node(node.get("nodeName", "Unknown"))
         
-        # Generate HTML for different parts
         attributes_html = ""
         if node.get("attributes"):
             attributes_html = f'<div class="arguments">{"".join([f"<div>{attr.get('name')}: {attr.get('value')}</div>" for attr in node.get("attributes", [])])}</div>'
@@ -196,7 +181,6 @@ def generate_visual_html(node, depth=0):
         
         main_attribute_html = "".join([f'<div class="main-attributes">{attr.get("name")}: {attr.get("value")}</div>' for attr in node.get("mainAttributes", [])])
         
-        # Generate arguments table
         arguments_table = ""
         if node.get("inArgs") or node.get("outArgs"):
             in_args_html = "<br>".join(node.get("inArgs", [])) or "-"
@@ -217,12 +201,10 @@ def generate_visual_html(node, depth=0):
                 </div>
             '''
         
-        # Generate HTML for all children
         children_html = ""
         for child in node.get("children", []):
             children_html += generate_visual_html(child, depth + 1)
         
-        # Final HTML for this node
         return f'''
             <div class="component" style="margin-left: {depth * 20}px;">
                 <div class="header">{icon} {node.get("nodeName", "Unknown")}{f' ({node["displayName"]})' if node.get("displayName") else ""}</div>
@@ -242,7 +224,6 @@ def get_xaml_visualization_css():
     """Return the CSS for styling the XAML visualization"""
     return """
     <style>
-        /* Dark Mode Styling for XAML Visualization */
         .xaml-visualization {
             font-family: "Source Sans Pro", sans-serif;
             background-color: rgb(14, 17, 23);
@@ -254,7 +235,6 @@ def get_xaml_visualization_css():
             box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.3);
         }
         
-        /* Component Container */
         .component {
             border: 1px solid #444;
             padding: 10px;
@@ -268,13 +248,11 @@ def get_xaml_visualization_css():
             box-sizing: border-box;
         }
         
-        /* Hover effect */
         .component:hover {
             box-shadow: 0px 5px 12px rgba(0, 0, 0, 0.6);
             border-color: #666;
         }
         
-        /* Header Styling */
         .header {
             font-weight: 600;
             background: linear-gradient(135deg, #2a5b98, #1a3e6e);
@@ -290,21 +268,18 @@ def get_xaml_visualization_css():
             margin-bottom: 8px;
         }
         
-        /* Nesting Handling */
         .children {
             border-left: 2px solid #444;
             padding-left: 5px;
             margin-top: 10px;
         }
         
-        /* Common section styling */
         .arguments, .main-arg, .annotation, .workflow-arguments {
             margin: 10px 0;
             padding: 12px;
             border-radius: 6px;
         }
         
-        /* Arguments */
         .arguments {
             border-left: 5px solid #0078D7;
             background: #112233;
@@ -323,7 +298,6 @@ def get_xaml_visualization_css():
             padding-left: 10px;
         }
         
-        /* Annotations */
         .annotation {
             border-left: 5px solid #4CAF50;
             background: #1b2d1b;
@@ -339,7 +313,6 @@ def get_xaml_visualization_css():
             color: #74d774;
         }
         
-        /* Main Arguments */
         .main-arg {
             display: flex;
             flex-wrap: wrap;
@@ -359,7 +332,6 @@ def get_xaml_visualization_css():
             width: 100%;
         }
         
-        /* Each Main Argument */
         .main-arg-item {
             display: flex;
             flex-direction: column;
@@ -367,7 +339,6 @@ def get_xaml_visualization_css():
             min-width: 150px;
         }
         
-        /* Labels */
         .main-arg-label {
             font-weight: bold;
             margin-bottom: 6px;
@@ -375,7 +346,6 @@ def get_xaml_visualization_css():
             color: #98c1ff;
         }
         
-        /* Main Argument Value Box */
         .main-arg-value {
             width: 100%;
             padding: 8px;
@@ -389,7 +359,6 @@ def get_xaml_visualization_css():
             box-sizing: border-box;
         }
         
-        /* Warning Box */
         .warning {
             border-left: 5px solid #d9534f;
             background-color: #2a1a1a;
@@ -487,16 +456,13 @@ def get_xaml_visualization_css():
 
 def render_xaml_visualization(xaml_content):
     """Render the visual representation of XAML content"""
-    # Parse the XAML to a dictionary structure
     xaml_dict = parse_xaml_to_dict(xaml_content)
     
     if "error" in xaml_dict:
         return f'<div class="error">Failed to parse XAML: {xaml_dict["error"]}</div>'
     
-    # Generate HTML visualization
     html_content = generate_visual_html(xaml_dict)
     
-    # Combine CSS and HTML
     css = get_xaml_visualization_css()
     full_html = f'{css}<div class="xaml-visualization">{html_content}</div>'
     
