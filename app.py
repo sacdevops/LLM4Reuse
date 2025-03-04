@@ -280,6 +280,7 @@ def handle_input(user_input: str):
         Return a JSON object with these fields:
         - "modify_code": boolean (true if code should change)
         - "modify_docs": boolean (true if documentation should change)
+        - "explain": boolean (true if user is asking a question that needs explanation)
         - "file_indices": array of integers (indices of files to modify, 0-indexed)
         
         Here are the available files:
@@ -298,6 +299,7 @@ def handle_input(user_input: str):
             analysis = {
                 "modify_code": False,
                 "modify_docs": False,
+                "explain": False,  # Default to explanation if JSON parsing fails
                 "file_indices": []
             }
 
@@ -346,10 +348,49 @@ def handle_input(user_input: str):
                 "content": "Documentation has been updated."
             })
             
-        if not analysis.get("modify_code", False) and not analysis.get("modify_docs", False):
+        if analysis.get("explain", False):
+            # Generate an explanation based on the user's question
+            file_indices = analysis.get("file_indices", [])
+            
+            # Prepare context for the explanation
+            files_context = ""
+            if file_indices:
+                for idx in file_indices:
+                    if idx < len(st.session_state.files):
+                        files_context += f"\nFile: {st.session_state.files[idx]['name']}\n"
+                        files_context += f"{st.session_state.files[idx]['content']}\n\n"
+            else:
+                # If no specific files are indicated, provide a summary of all files
+                files_context = "\n".join([
+                    f"File {i}: {f['name']}" 
+                    for i, f in enumerate(st.session_state.files)
+                ])
+            
+            explanation_prompt = f"""
+            The user has the following question about the UiPath workflow:
+            {user_input}
+            
+            Please provide a detailed and helpful explanation based on the available information.
+            
+            Documentation:
+            {st.session_state.documentation}
+            
+            Code context:
+            {files_context}
+            """
+            
+            explanation = make_openai_call(explanation_prompt, 500)
+            
             st.session_state.chat_history.append({
                 "role": "assistant",
-                "content": "I understood your request, but no changes were needed."
+                "content": explanation
+            })
+        
+        # If no actions were taken and no explanation was given, provide a default response
+        if not analysis.get("modify_code", False) and not analysis.get("modify_docs", False) and not analysis.get("explain", False):
+            st.session_state.chat_history.append({
+                "role": "assistant",
+                "content": "I understood your request, but I'm not sure how to help. Could you please provide more details or rephrase your question?"
             })
         
     except Exception as e:
