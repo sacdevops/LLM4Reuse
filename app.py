@@ -246,12 +246,14 @@ def generate_combined_docs(xaml_files):
     3. Write the documentation in a clear and concise manner
     4. Focus on:
        - Overall workflow purpose and flow
+       - Dependencies and requirements
        - File interactions
        - Custom implementations
        - Business logic
        - Data flow
        - Inputs/outputs
        - and another relevant information based on the xaml code
+       - Potential errors and exceptions
        - Conclusion
     5. Format the documentation using proper Markdown syntax:
        - Use # for main titles, ## for subtitles, ### for section headers
