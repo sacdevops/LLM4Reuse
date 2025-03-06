@@ -252,8 +252,9 @@ def generate_combined_docs(xaml_files):
        - Business logic
        - Data flow
        - Inputs/outputs
-       - and another relevant information based on the xaml code
-       - Potential errors and exceptions
+       - and another relevant information based on the xaml code (Should focus more on the details from code, not general suggestions)
+       - Potential errors and exceptions (Should focus more on the details from code, not general suggestions)
+       - Possible improvements (Should focus more on the details from code, not general suggestions)
        - Conclusion
     5. Format the documentation using proper Markdown syntax:
        - Use # for main titles, ## for subtitles, ### for section headers
