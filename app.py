@@ -220,7 +220,8 @@ def make_openai_call(prompt: str, custom_max_tokens: int = None, responseJsonFor
             messages=[{"role": "user", "content": prompt}],
             max_completion_tokens=custom_max_tokens or MODEL_CONFIG['max_tokens'],
             model=MODEL_CONFIG['model'] if llm_model is None else llm_model,
-            response_format={"type": "json_object" if responseJsonFormat else "text"}
+            response_format={"type": "json_object" if responseJsonFormat else "text"},
+            reasoning_effort="high"
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
@@ -382,7 +383,7 @@ def handle_input(user_input: str):
             {files_context}
             """
             
-            explanation = make_openai_call(explanation_prompt, 500)
+            explanation = make_openai_call(explanation_prompt)
             
             st.session_state.chat_history.append({
                 "role": "assistant",
