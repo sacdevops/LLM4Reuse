@@ -216,13 +216,21 @@ st.markdown("""
 
 def make_openai_call(prompt: str, custom_max_tokens: int = None, responseJsonFormat: bool = False, llm_model: str = None) -> str:
     try:
-        response = openai.chat.completions.create(
-            messages=[{"role": "user", "content": prompt}],
-            max_completion_tokens=custom_max_tokens or MODEL_CONFIG['max_tokens'],
-            model=MODEL_CONFIG['model'] if llm_model is None else llm_model,
-            response_format={"type": "json_object" if responseJsonFormat else "text"},
-            reasoning_effort="high"
-        )
+        if llm_model is None:
+            response = openai.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                max_completion_tokens=custom_max_tokens or MODEL_CONFIG['max_tokens'],
+                model=MODEL_CONFIG['model'] if llm_model is None else llm_model,
+                response_format={"type": "json_object" if responseJsonFormat else "text"},
+                reasoning_effort="high"
+            )
+        else:
+            response = openai.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                max_completion_tokens=custom_max_tokens or MODEL_CONFIG['max_tokens'],
+                model=MODEL_CONFIG['model'] if llm_model is None else llm_model,
+                response_format={"type": "json_object" if responseJsonFormat else "text"},
+            )
         return response.choices[0].message.content.strip()
     except Exception as e:
         st.error(f"OpenAI API Error: {str(e)}")
@@ -295,7 +303,7 @@ def handle_input(user_input: str):
         JSON RESPONSE:
         """
         
-        analysis_response = make_openai_call(analysis_prompt, 150, True, llm_model="gpt-4o-mini")
+        analysis_response = make_openai_call(analysis_prompt, 16000, True, llm_model="gpt-4o-mini")
         
         try:
             analysis = json.loads(analysis_response)
