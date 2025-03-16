@@ -7,6 +7,7 @@ import io
 import re
 import json
 from xaml_visualizer import render_xaml_visualization
+import time
 
 st.set_page_config(page_title="LLM4Reuse", layout="wide", initial_sidebar_state="collapsed")
 
@@ -38,6 +39,10 @@ if 'user_input' not in st.session_state:
     st.session_state.user_input = ""
 if 'view_mode' not in st.session_state:
     st.session_state.view_mode = {}
+if 'global_view_mode' not in st.session_state:
+    st.session_state.global_view_mode = "visual"
+if 'previous_upload_count' not in st.session_state:
+    st.session_state.previous_upload_count = 0
 
 st.markdown("""
     <style>
@@ -185,6 +190,54 @@ st.markdown("""
     button[data-testid="baseButton-secondary"]:hover {
         background-color: #45a049 !important;
     }
+    .loading-container {
+        width: 100%;
+        padding: 20px 0;
+        text-align: center;
+        animation: pulse 1.5s infinite ease-in-out;
+        border-radius: 8px;
+        margin: 10px 0;
+        background-color: rgba(76, 175, 80, 0.2);
+    }
+    .loading-animation {
+        display: inline-block;
+        width: 50px;
+        height: 50px;
+        border: 5px solid rgba(76, 175, 80, 0.3);
+        border-radius: 50%;
+        border-top-color: #4CAF50;
+        animation: spin 1s ease-in-out infinite;
+    }
+    @keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+    @keyframes pulse {
+        0% { opacity: 0.6; }
+        50% { opacity: 1; }
+        100% { opacity: 0.6; }
+    }
+    .loading-text {
+        margin-top: 10px;
+        font-weight: bold;
+        color: #4CAF50;
+    }
+    .overlay-container {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: rgba(255, 255, 255, 0.8);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+        border-radius: 4px;
+    }
+    .section-container {
+        position: relative;
+    }
     </style>
 
     <script>
@@ -213,6 +266,27 @@ st.markdown("""
     });
     </script>
 """, unsafe_allow_html=True)
+
+def show_loading_indicator(message="Processing..."):
+    """Display a global loading indicator with animation"""
+    loading_placeholder = st.empty()
+    loading_placeholder.markdown(f"""
+    <div class="loading-container">
+        <div class="loading-animation"></div>
+        <div class="loading-text">{message}</div>
+    </div>
+    """, unsafe_allow_html=True)
+    return loading_placeholder
+
+def show_section_loading(container, message="Processing..."):
+    """Display a loading indicator that overlays only a specific section"""
+    container.markdown(f"""
+    <div class="overlay-container">
+        <div class="loading-animation"></div>
+        <div class="loading-text">{message}</div>
+    </div>
+    """, unsafe_allow_html=True)
+    return container
 
 def make_openai_call(prompt: str, custom_max_tokens: int = None, responseJsonFormat: bool = False, llm_model: str = None) -> str:
     try:
@@ -244,7 +318,7 @@ def clean_code_output(code_text):
 def generate_combined_docs(xaml_files):
     if not xaml_files:
         return ""
-        
+    
     all_content = "\n\n".join(f"{f['content']}" for f in xaml_files)
 
     prompt = f"""
@@ -253,17 +327,18 @@ def generate_combined_docs(xaml_files):
     1. IGNORE standard libraries (System.*, Microsoft.*, UiPath.*, mscorlib)
     2. Write the documentation directly without any comments
     3. Write the documentation in a clear and concise manner
+    4. Always adhere to the prompting from the user. If they want a change to the structure, content or anything else, you will implement it
+    5. Be detailed in the documentation, try not to be general, but go into detail related to the code.
     4. Focus on:
        - Overall workflow purpose and flow
+       - Business logic
        - Dependencies and requirements
        - File interactions
        - Custom implementations
-       - Business logic
        - Data flow
        - Inputs/outputs
-       - and another relevant information based on the xaml code (Should focus more on the details from code, not general suggestions)
        - Potential errors and exceptions (Should focus more on the details from code, not general suggestions)
-       - Possible improvements (Should focus more on the details from code, not general suggestions)
+       - Possible improvements with Priorities (Should focus more on the details from code, not general suggestions, also where it can be implemented, how it should be used and why)
        - Conclusion
     5. Format the documentation using proper Markdown syntax:
        - Use # for main titles, ## for subtitles, ### for section headers
@@ -285,6 +360,9 @@ def generate_combined_docs(xaml_files):
 def handle_input(user_input: str):
     if not user_input or not user_input.strip():
         return
+    
+    docs_container = st.empty()
+    code_container = st.empty()
     
     try:
         analysis_prompt = f"""
@@ -311,11 +389,13 @@ def handle_input(user_input: str):
             analysis = {
                 "modify_code": False,
                 "modify_docs": False,
-                "explain": False,  # Default to explanation if JSON parsing fails
+                "explain": False,
                 "file_indices": []
             }
 
         if analysis.get("modify_code", False):
+            show_section_loading(code_container, "Updating XAML code...")
+            
             file_indices = analysis.get("file_indices", [st.session_state.get('active_tab', 0)])
             modified_files = []
             
@@ -352,19 +432,23 @@ def handle_input(user_input: str):
                     "role": "assistant",
                     "content": f"Updated files: {', '.join(modified_files)}"
                 })
+            
+            code_container.empty()
         
         if analysis.get("modify_docs", False):
+            show_section_loading(docs_container, "Updating documentation...")
+            
             st.session_state.documentation = generate_combined_docs(st.session_state.files)
             st.session_state.chat_history.append({
                 "role": "assistant",
                 "content": "Documentation has been updated."
             })
             
+            docs_container.empty()
+            
         if analysis.get("explain", False):
-            # Generate an explanation based on the user's question
             file_indices = analysis.get("file_indices", [])
             
-            # Prepare context for the explanation
             files_context = ""
             if file_indices:
                 for idx in file_indices:
@@ -372,7 +456,6 @@ def handle_input(user_input: str):
                         files_context += f"\nFile: {st.session_state.files[idx]['name']}\n"
                         files_context += f"{st.session_state.files[idx]['content']}\n\n"
             else:
-                # If no specific files are indicated, provide a summary of all files
                 files_context = "\n".join([
                     f"File {i}: {f['name']}" 
                     for i, f in enumerate(st.session_state.files)
@@ -398,7 +481,6 @@ def handle_input(user_input: str):
                 "content": explanation
             })
         
-        # If no actions were taken and no explanation was given, provide a default response
         if not analysis.get("modify_code", False) and not analysis.get("modify_docs", False) and not analysis.get("explain", False):
             st.session_state.chat_history.append({
                 "role": "assistant",
@@ -410,6 +492,10 @@ def handle_input(user_input: str):
             "role": "assistant",
             "content": f"Error: {str(e)}"
         })
+    
+    finally:
+        docs_container.empty()
+        code_container.empty()
 
 def create_download_zip():
     memory_file = io.BytesIO()
@@ -420,6 +506,57 @@ def create_download_zip():
             zf.writestr('documentation.txt', st.session_state.documentation)
     memory_file.seek(0)
     return memory_file
+
+def handle_additional_file_upload():
+    """Handle the upload of additional XAML files after initial setup"""
+    try:
+        additional_files = st.session_state.additional_files
+        
+        if additional_files:
+            code_container = st.empty()
+            docs_container = st.empty()
+            
+            new_files = []
+            for file in additional_files:
+                content = file.read().decode('utf-8')
+                
+                base_name = file.name
+                file_name = base_name
+                counter = 1
+                
+                existing_names = [f['name'] for f in st.session_state.files]
+                while file_name in existing_names:
+                    name_parts = base_name.rsplit('.', 1)
+                    if len(name_parts) > 1:
+                        file_name = f"{name_parts[0]}_{counter}.{name_parts[1]}"
+                    else:
+                        file_name = f"{base_name}_{counter}"
+                    counter += 1
+                
+                new_file = {
+                    'name': file_name,
+                    'content': content
+                }
+                new_files.append(new_file)
+                st.session_state.files.append(new_file)
+            
+            show_section_loading(code_container, "Processing new files...")
+            st.session_state.documentation = generate_combined_docs(st.session_state.files)
+            
+            st.session_state.chat_history.append({
+                "role": "assistant",
+                "content": f"Added {len(new_files)} new file(s) and updated documentation."
+            })
+            
+            code_container.empty()
+            docs_container.empty()
+    except Exception as e:
+        st.error(f"Error processing files: {str(e)}")
+
+def handle_additional_file_change():
+    """Callback when files are added to the uploader"""
+    if len(st.session_state.additional_files or []) > 0:
+        handle_additional_file_upload()
 
 def show_main_interface():
     st.markdown('''
@@ -443,7 +580,7 @@ def show_main_interface():
     with cols[0]:
         st.subheader("Documentation")
         st.markdown(
-            '<div class="documentation-container">'
+            '<div class="section-container documentation-container">'
             f'{st.session_state.documentation}'
             '</div>',
             unsafe_allow_html=True
@@ -478,7 +615,30 @@ def show_main_interface():
     with cols[2]:
         row = st.columns([3, 1])
         with row[0]:
-            st.subheader("XAML")
+            st.markdown("""
+            <style>
+            [data-testid="stFileUploader"] {
+                width: auto !important;
+            }
+            [data-testid="stFileUploader"] section {
+                padding: 0 !important;
+            }
+            [data-testid="stFileUploader"] section > div {
+                padding: 0 !important;
+            }
+            [data-testid="stFileUploader"] section small {
+                margin: 0 !important;
+            }
+            [data-testid="stFileUploader"] section > div:first-child {
+                min-height: 5rem !important;
+            }
+            </style>
+            """, unsafe_allow_html=True)
+            
+            with st.container():
+                st.file_uploader("Upload additional files", accept_multiple_files=True, key="additional_files", 
+                                 type=['xaml'], on_change=handle_additional_file_change, label_visibility="collapsed")
+        
         with row[1]:
             st.download_button(
                 "Download All",
@@ -486,44 +646,45 @@ def show_main_interface():
                 file_name="workflow_package.zip",
                 mime="application/zip"
             )
-
+            
+            toggle_text = "🔄 Show Code" if st.session_state.global_view_mode == "visual" else "🔄 Show Visual"
+            if st.button(toggle_text, key="global_toggle"):
+                st.session_state.global_view_mode = "code" if st.session_state.global_view_mode == "visual" else "visual"
+                st.rerun()
+        
+        st.markdown("<hr style='margin: 10px 0; border: 0; border-top: 1px solid rgba(0,0,0,0.1);'>", unsafe_allow_html=True)
+        
+        st.markdown('''<div class="section-container">''', unsafe_allow_html=True)
+        
         tabs = st.tabs([f.get('name') for f in st.session_state.files])
+        
         for i, tab in enumerate(tabs):
             with tab:
                 st.session_state.active_tab = i
                 
-                file_key = f"view_mode_{i}"
+                xaml_content = st.session_state.files[i]['content']
                 
-                if file_key not in st.session_state.view_mode:
-                    st.session_state.view_mode[file_key] = "code"
-                
-                col1, col2 = st.columns([2, 1])
-                with col2:
-                    current_mode = st.session_state.view_mode[file_key]
-                    toggle_text = "🔄 Visual" if current_mode == "code" else "🔄 Code"
-                    
-                    if st.button(toggle_text, key=f"toggle_{i}"):
-                        st.session_state.view_mode[file_key] = "visual" if current_mode == "code" else "code"
-                        st.rerun()
-            
-                if st.session_state.view_mode[file_key] == "code":
+                if st.session_state.global_view_mode == "code":
                     st.text_area(
                         "",
-                        value=st.session_state.files[i]['content'],
+                        value=xaml_content,
                         height=650,
                         key=f"xaml_{i}",
                         disabled=True
                     )
                 else:
-                    xaml_content = st.session_state.files[i]['content']
                     html_content = render_xaml_visualization(xaml_content)
                     components.html(html_content, height=650, scrolling=True)
+        
+        st.markdown('''</div>''', unsafe_allow_html=True)
 
 if not st.session_state.initialized:
     st.title("LLM4Reuse")
     uploaded_files = st.file_uploader("Upload XAML files", accept_multiple_files=True, type=['xaml'])
 
     if uploaded_files:
+        loading_indicator = show_loading_indicator("Processing uploaded files...")
+        
         new_files = []
         for file in uploaded_files:
             content = file.read().decode('utf-8')
@@ -535,6 +696,7 @@ if not st.session_state.initialized:
         st.session_state.files = new_files
         st.session_state.documentation = generate_combined_docs(new_files)
         st.session_state.initialized = True
+        loading_indicator.empty()
         st.rerun()
 else:
     show_main_interface()
