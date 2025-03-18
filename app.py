@@ -8,6 +8,10 @@ import re
 import json
 from xaml_visualizer import render_xaml_visualization
 import time
+import copy
+import datetime
+import difflib
+from html import escape
 
 st.set_page_config(page_title="LLM4Reuse", layout="wide", initial_sidebar_state="collapsed")
 
@@ -43,6 +47,24 @@ if 'global_view_mode' not in st.session_state:
     st.session_state.global_view_mode = "visual"
 if 'previous_upload_count' not in st.session_state:
     st.session_state.previous_upload_count = 0
+
+# Version control variables
+if 'version_history' not in st.session_state:
+    st.session_state.version_history = []
+if 'current_version_index' not in st.session_state:
+    st.session_state.current_version_index = -1
+if 'versions_available' not in st.session_state:
+    st.session_state.versions_available = 0
+
+# Add diff view mode to session state
+if 'diff_view_mode' not in st.session_state:
+    st.session_state.diff_view_mode = False
+
+# Add these new session state variables
+if 'editing_documentation' not in st.session_state:
+    st.session_state.editing_documentation = False
+if 'editing_code' not in st.session_state:
+    st.session_state.editing_code = {}
 
 st.markdown("""
     <style>
@@ -238,32 +260,100 @@ st.markdown("""
     .section-container {
         position: relative;
     }
+    .version-container {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 10px;
+        gap: 10px;
+    }
+    .version-button {
+        border: none;
+        background-color: #4CAF50;
+        color: white;
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        cursor: pointer;
+        font-size: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .version-button:disabled {
+        background-color: #cccccc;
+        cursor: not-allowed;
+    }
+    .version-info {
+        font-size: 14px;
+        color: #555;
+    }
+    
+    /* Diff styles */
+    .diff {
+        font-family: monospace;
+        white-space: pre-wrap;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+        line-height: 1.4;
+    }
+    .diff-line {
+        display: block;
+        width: 100%;
+    }
+    .diff-added {
+        background-color: #2cbe4e;
+        border-left: 4px solid #1b8a38;
+        color: #ffffff;
+    }
+    .diff-removed {
+        background-color: #cb2431;
+        border-left: 4px solid #9e1c26;
+        color: #ffffff;
+    }
+    .diff-unchanged {
+        border-left: 4px solid transparent;
+    }
+    .diff-added-char {
+        background-color: #26a745;
+    }
+    .diff-removed-char {
+        background-color: #b31d28;
+        text-decoration: line-through;
+        color: #ffffff;
+    }
+    .diff-header {
+        background-color: #0366d6;
+        color: #ffffff;
+        padding: 5px;
+        margin-bottom: 10px;
+        border-radius: 4px 4px 0 0;
+        border-bottom: 1px solid #c8e1ff;
+    }
+    .diff-file-header {
+        font-weight: bold;
+        color: #0366d6;
+        margin-top: 15px;
+        margin-bottom: 5px;
+    }
+    .diff-controls {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 5px;
+        background-color: #f6f8fa;
+        border-bottom: 1px solid #e1e4e8;
+    }
+    .no-diff-message {
+        padding: 10px;
+        background-color: #f1f8ff;
+        border-left: 4px solid #0366d6;
+        margin: 10px 0;
+    }
     </style>
-
+    
     <script>
-    // Prevent Enter key from submitting the form
-    document.addEventListener('DOMContentLoaded', function() {
-        const observer = new MutationObserver((mutations) => {
-            for (const mutation of mutations) {
-                if (mutation.addedNodes.length) {
-                    const inputs = document.querySelectorAll('[data-testid="stTextInput"] input');
-                    inputs.forEach(input => {
-                        if (!input.getAttribute('data-enter-handler')) {
-                            input.setAttribute('data-enter-handler', 'true');
-                            input.addEventListener('keydown', function(e) {
-                                if (e.key === 'Enter') {
-                                    e.preventDefault();
-                                    return false;
-                                }
-                            });
-                        }
-                    });
-                }
-            }
-        });
-        
-        observer.observe(document.body, { childList: true, subtree: true });
-    });
     </script>
 """, unsafe_allow_html=True)
 
@@ -337,8 +427,8 @@ def generate_combined_docs(xaml_files):
        - Custom implementations
        - Data flow
        - Inputs/outputs
-       - Potential errors and exceptions (Should focus more on the details from code, not general suggestions)
-       - Possible improvements with Priorities (Should focus more on the details from code, not general suggestions, also where it can be implemented, how it should be used and why)
+       - Potential errors and exceptions (Should focus more on the details from code, not general suggestions. Should include also privacy issues when personal data is involved, like privacy-sensitive data in non-compliant ways)
+       - Possible improvements with priorities (Should focus more on the details from code, not general suggestions, also where it can be implemented, how it should be used and why)
        - Conclusion
     5. Format the documentation using proper Markdown syntax:
        - Use # for main titles, ## for subtitles, ### for section headers
@@ -356,6 +446,172 @@ def generate_combined_docs(xaml_files):
     """
     raw_docs = make_openai_call(prompt)
     return raw_docs
+
+def generate_diff_html(old_text, new_text, context_lines=3):
+    """Generate HTML that shows differences between two texts with context"""
+    if old_text == new_text:
+        return f"<div class='diff-header'>No changes</div><pre class='diff'>{escape(new_text)}</pre>"
+    
+    old_lines = old_text.splitlines()
+    new_lines = new_text.splitlines()
+    
+    # Use difflib to get the differences
+    differ = difflib.unified_diff(old_lines, new_lines, n=context_lines, lineterm='')
+    
+    # Skip the first two lines (--- and +++)
+    diff_lines = list(differ)[2:]
+    
+    html_parts = ['<div class="diff">']
+    
+    for line in diff_lines:
+        if line.startswith('+'):
+            html_parts.append(f'<span class="diff-line diff-added">{escape(line)}</span>')
+        elif line.startswith('-'):
+            html_parts.append(f'<span class="diff-line diff-removed">{escape(line)}</span>')
+        elif line.startswith('@@'):
+            html_parts.append(f'<span class="diff-line diff-header">{escape(line)}</span>')
+        else:
+            html_parts.append(f'<span class="diff-line diff-unchanged">{escape(line)}</span>')
+    
+    html_parts.append('</div>')
+    return ''.join(html_parts)
+
+def generate_diff_for_files(old_files, new_files):
+    """Generate diff HTML for all files that have changed"""
+    html_parts = []
+    
+    # Map files by name for easier comparison
+    old_files_map = {f['name']: f['content'] for f in old_files}
+    new_files_map = {f['name']: f['content'] for f in new_files}
+    
+    # Files that exist in both versions or only in new version
+    for file_name, new_content in new_files_map.items():
+        if file_name in old_files_map:
+            old_content = old_files_map[file_name]
+            if old_content != new_content:
+                html_parts.append(f'<div class="diff-file-header">{file_name} (modified)</div>')
+                html_parts.append(generate_diff_html(old_content, new_content))
+        else:
+            html_parts.append(f'<div class="diff-file-header">{file_name} (new file)</div>')
+            html_parts.append(generate_diff_html("", new_content))
+    
+    # Files that were deleted
+    for file_name in old_files_map:
+        if file_name not in new_files_map:
+            html_parts.append(f'<div class="diff-file-header">{file_name} (deleted)</div>')
+            html_parts.append(generate_diff_html(old_files_map[file_name], ""))
+    
+    return ''.join(html_parts)
+
+def save_version():
+    """Save current state as a new version"""
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # If we're at a previous version, remove all versions after current one
+    if st.session_state.current_version_index < len(st.session_state.version_history) - 1:
+        st.session_state.version_history = st.session_state.version_history[:st.session_state.current_version_index + 1]
+    
+    # Create a deep copy of files to avoid reference issues
+    files_copy = copy.deepcopy(st.session_state.files)
+    
+    # Save current state
+    version = {
+        'timestamp': timestamp,
+        'files': files_copy,
+        'documentation': st.session_state.documentation,
+        'version_number': len(st.session_state.version_history) + 1
+    }
+    
+    st.session_state.version_history.append(version)
+    st.session_state.current_version_index = len(st.session_state.version_history) - 1
+    st.session_state.versions_available = len(st.session_state.version_history)
+
+def toggle_documentation_editing():
+    """Toggle documentation editing mode"""
+    st.session_state.editing_documentation = not st.session_state.editing_documentation
+
+def save_documentation_edits():
+    """Save edited documentation"""
+    if 'edited_documentation' in st.session_state:
+        st.session_state.documentation = st.session_state.edited_documentation
+        save_version()
+        st.session_state.editing_documentation = False
+        st.session_state.chat_history.append({
+            "role": "assistant",
+            "content": "Documentation has been manually updated."
+        })
+        st.rerun()
+
+def toggle_code_editing(file_index):
+    """Toggle code editing mode for a file"""
+    if file_index in st.session_state.editing_code:
+        st.session_state.editing_code[file_index] = not st.session_state.editing_code[file_index]
+    else:
+        st.session_state.editing_code[file_index] = True
+
+def save_code_edits(file_index):
+    """Save edited code for a file"""
+    if f'edited_xaml_{file_index}' in st.session_state:
+        st.session_state.files[file_index]['content'] = st.session_state[f'edited_xaml_{file_index}']
+        save_version()
+        st.session_state.editing_code[file_index] = False
+        st.session_state.chat_history.append({
+            "role": "assistant",
+            "content": f"Code for {st.session_state.files[file_index]['name']} has been manually updated."
+        })
+        st.rerun()
+
+def navigate_version(index, show_diff=False):
+    """Navigate to a specific version and optionally show diff"""
+    if 0 <= index < len(st.session_state.version_history):
+        # Get the previous version for comparison if showing diff
+        previous_index = index - 1
+        if show_diff and previous_index >= 0:
+            previous_version = st.session_state.version_history[previous_index]
+            
+            # Navigate to the selected version
+            version = st.session_state.version_history[index]
+            
+            # Generate diff between previous version and current version
+            st.session_state.code_diff = generate_diff_for_files(
+                previous_version['files'], version['files'])
+            
+            st.session_state.docs_diff = generate_diff_html(
+                previous_version['documentation'], version['documentation'])
+        else:
+            # If it's the first version or diff view is off, clear diffs
+            st.session_state.code_diff = None
+            st.session_state.docs_diff = None
+        
+        # Navigate to the selected version
+        version = st.session_state.version_history[index]
+        st.session_state.files = copy.deepcopy(version['files'])
+        st.session_state.documentation = version['documentation']
+        st.session_state.current_version_index = index
+        
+        return True
+    return False
+
+def handle_version_navigation(direction):
+    """Navigate between versions"""
+    target_index = st.session_state.current_version_index + direction
+    
+    if navigate_version(target_index, st.session_state.diff_view_mode):
+        st.rerun()
+
+def toggle_diff_view():
+    """Toggle between normal and diff view mode"""
+    st.session_state.diff_view_mode = not st.session_state.diff_view_mode
+    
+    # If turning diff view on, check if we're not on the first version
+    if st.session_state.diff_view_mode and st.session_state.current_version_index > 0:
+        navigate_version(st.session_state.current_version_index, True)
+    else:
+        # Clear any existing diff
+        st.session_state.code_diff = None
+        st.session_state.docs_diff = None
+    
+    st.rerun()
 
 def handle_input(user_input: str):
     if not user_input or not user_input.strip():
@@ -393,6 +649,8 @@ def handle_input(user_input: str):
                 "file_indices": []
             }
 
+        changes_made = False
+
         if analysis.get("modify_code", False):
             show_section_loading(code_container, "Updating XAML code...")
             
@@ -428,6 +686,7 @@ def handle_input(user_input: str):
                     modified_files.append(file_name)
             
             if modified_files:
+                changes_made = True
                 st.session_state.chat_history.append({
                     "role": "assistant",
                     "content": f"Updated files: {', '.join(modified_files)}"
@@ -439,6 +698,7 @@ def handle_input(user_input: str):
             show_section_loading(docs_container, "Updating documentation...")
             
             st.session_state.documentation = generate_combined_docs(st.session_state.files)
+            changes_made = True
             st.session_state.chat_history.append({
                 "role": "assistant",
                 "content": "Documentation has been updated."
@@ -486,6 +746,10 @@ def handle_input(user_input: str):
                 "role": "assistant",
                 "content": "I understood your request, but I'm not sure how to help. Could you please provide more details or rephrase your question?"
             })
+        
+        # Save version if changes were made
+        if changes_made:
+            save_version()
         
     except Exception as e:
         st.session_state.chat_history.append({
@@ -543,6 +807,9 @@ def handle_additional_file_upload():
             show_section_loading(code_container, "Processing new files...")
             st.session_state.documentation = generate_combined_docs(st.session_state.files)
             
+            # Save new version after file upload
+            save_version()
+            
             st.session_state.chat_history.append({
                 "role": "assistant",
                 "content": f"Added {len(new_files)} new file(s) and updated documentation."
@@ -559,18 +826,90 @@ def handle_additional_file_change():
         handle_additional_file_upload()
 
 def show_main_interface():
+    # Add a top header row with all controls
+    st.markdown("<h3 style='text-align:center; margin-bottom:15px;'>LLM4Reuse</h3>", unsafe_allow_html=True)
+    
+    # Top control row 
+    header_cols = st.columns([3, 6, 3])
+    
+    with header_cols[0]:
+        # Version navigation on the left
+        if len(st.session_state.version_history) > 0:
+            version_cols = st.columns([1, 2, 1, 1])
+            with version_cols[0]:
+                prev_disabled = st.session_state.current_version_index <= 0
+                if st.button("◀", key="prev_version", disabled=prev_disabled):
+                    handle_version_navigation(-1)
+            
+            with version_cols[1]:
+                version_text = f"V{st.session_state.current_version_index + 1}/{len(st.session_state.version_history)}"
+                st.markdown(f"<div class='version-info' style='text-align:center'>{version_text}</div>", unsafe_allow_html=True)
+            
+            with version_cols[2]:
+                next_disabled = st.session_state.current_version_index >= len(st.session_state.version_history) - 1
+                if st.button("▶", key="next_version", disabled=next_disabled):
+                    handle_version_navigation(1)
+                    
+            with version_cols[3]:
+                diff_label = "🔍 Normal" if st.session_state.diff_view_mode else "🔍 Diff"
+                if st.button(diff_label, key="toggle_diff"):
+                    toggle_diff_view()
+    
+    with header_cols[1]:
+        # File uploader in the middle
+        st.markdown("""
+        <style>
+        [data-testid="stFileUploader"] {
+            width: auto !important;
+        }
+        [data-testid="stFileUploader"] section {
+            padding: 0 !important;
+        }
+        [data-testid="stFileUploader"] section > div {
+            padding: 0 !important;
+        }
+        [data-testid="stFileUploader"] section small {
+            margin: 0 !important;
+        }
+        [data-testid="stFileUploader"] section > div:first-child {
+            min-height: 2.5rem !important;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        st.file_uploader("Upload additional files", accept_multiple_files=True, key="additional_files", 
+                         type=['xaml'], on_change=handle_additional_file_change, label_visibility="collapsed")
+    
+    with header_cols[2]:
+        # Download and toggle buttons on the right
+        button_cols = st.columns(2)
+        with button_cols[0]:
+            st.download_button(
+                "📥 Download",
+                data=create_download_zip(),
+                file_name="workflow_package.zip",
+                mime="application/zip"
+            )
+        
+        with button_cols[1]:
+            toggle_text = "🔄 Code" if st.session_state.global_view_mode == "visual" else "🔄 Visual"
+            if st.button(toggle_text, key="global_toggle"):
+                st.session_state.global_view_mode = "code" if st.session_state.global_view_mode == "visual" else "visual"
+                st.rerun()
+
+    st.markdown("<hr style='margin:10px 0;'>", unsafe_allow_html=True)
+
+    # Main content
     st.markdown('''
     <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.5rem;">
       <div style="flex:1;">
         <h5 style="margin:0; text-align:left;">Documentation</h5>
       </div>
       <div style="flex:1;">
-        <h5 style="margin:0; text-align:center;">XAML Code</h5>
+        <h5 style="margin:0; text-align:center;">Assistant</h5>
       </div>
-      <div style="flex:0;">
-    ''', unsafe_allow_html=True)
-
-    st.markdown('''
+      <div style="flex:1;">
+        <h5 style="margin:0;">XAML Code</h5>
       </div>
     </div>
     ''', unsafe_allow_html=True)
@@ -578,17 +917,58 @@ def show_main_interface():
     cols = st.columns(3)
 
     with cols[0]:
-        st.subheader("Documentation")
-        st.markdown(
-            '<div class="section-container documentation-container">'
-            f'{st.session_state.documentation}'
-            '</div>',
-            unsafe_allow_html=True
-        )
+        # Documentation - show diff or normal view
+        if st.session_state.diff_view_mode:
+            if st.session_state.current_version_index > 0 and getattr(st.session_state, 'docs_diff', None):
+                st.markdown(
+                    '<div class="section-container documentation-container">'
+                    f'{st.session_state.docs_diff}'
+                    '</div>',
+                    unsafe_allow_html=True
+                )
+            elif st.session_state.current_version_index == 0:
+                st.markdown(
+                    '<div class="section-container documentation-container">'
+                    '<div class="no-diff-message">This is the first version. No previous version to compare with.</div>'
+                    f'{st.session_state.documentation}'
+                    '</div>',
+                    unsafe_allow_html=True
+                )
+            else:
+                st.markdown(
+                    '<div class="section-container documentation-container">'
+                    '<div class="no-diff-message">No changes detected between versions.</div>'
+                    f'{st.session_state.documentation}'
+                    '</div>',
+                    unsafe_allow_html=True
+                )
+        else:
+            st.markdown(
+                '<div class="section-container documentation-container">'
+                f'{st.session_state.documentation}'
+                '</div>',
+                unsafe_allow_html=True
+            )
+            
+            # Add documentation editing controls
+            edit_doc_col1, edit_doc_col2 = st.columns(2)
+            with edit_doc_col1:
+                if st.button("✏️ Edit Documentation", key="toggle_doc_edit"):
+                    toggle_documentation_editing()
+                    st.rerun()
+            
+            # Show editable text area when editing is enabled
+            if st.session_state.editing_documentation:
+                st.text_area("Edit Documentation", 
+                            value=st.session_state.documentation, 
+                            height=550, 
+                            key="edited_documentation")
+                
+                with edit_doc_col2:
+                    if st.button("💾 Save Documentation", key="save_doc_edit"):
+                        save_documentation_edits()
 
     with cols[1]:
-        st.subheader("Assistant")
-        
         chat_container = st.container()
         
         with chat_container:
@@ -613,47 +993,6 @@ def show_main_interface():
             st.markdown('</div>', unsafe_allow_html=True)
 
     with cols[2]:
-        row = st.columns([3, 1])
-        with row[0]:
-            st.markdown("""
-            <style>
-            [data-testid="stFileUploader"] {
-                width: auto !important;
-            }
-            [data-testid="stFileUploader"] section {
-                padding: 0 !important;
-            }
-            [data-testid="stFileUploader"] section > div {
-                padding: 0 !important;
-            }
-            [data-testid="stFileUploader"] section small {
-                margin: 0 !important;
-            }
-            [data-testid="stFileUploader"] section > div:first-child {
-                min-height: 5rem !important;
-            }
-            </style>
-            """, unsafe_allow_html=True)
-            
-            with st.container():
-                st.file_uploader("Upload additional files", accept_multiple_files=True, key="additional_files", 
-                                 type=['xaml'], on_change=handle_additional_file_change, label_visibility="collapsed")
-        
-        with row[1]:
-            st.download_button(
-                "Download All",
-                data=create_download_zip(),
-                file_name="workflow_package.zip",
-                mime="application/zip"
-            )
-            
-            toggle_text = "🔄 Show Code" if st.session_state.global_view_mode == "visual" else "🔄 Show Visual"
-            if st.button(toggle_text, key="global_toggle"):
-                st.session_state.global_view_mode = "code" if st.session_state.global_view_mode == "visual" else "visual"
-                st.rerun()
-        
-        st.markdown("<hr style='margin: 10px 0; border: 0; border-top: 1px solid rgba(0,0,0,0.1);'>", unsafe_allow_html=True)
-        
         st.markdown('''<div class="section-container">''', unsafe_allow_html=True)
         
         tabs = st.tabs([f.get('name') for f in st.session_state.files])
@@ -663,23 +1002,78 @@ def show_main_interface():
                 st.session_state.active_tab = i
                 
                 xaml_content = st.session_state.files[i]['content']
+                file_name = st.session_state.files[i]['name']
                 
-                if st.session_state.global_view_mode == "code":
-                    st.text_area(
-                        "",
-                        value=xaml_content,
-                        height=650,
-                        key=f"xaml_{i}",
-                        disabled=True
-                    )
+                # Check if we're in diff mode and have diff content for this file
+                if st.session_state.diff_view_mode:
+                    if st.session_state.current_version_index == 0:
+                        # First version - show message
+                        st.markdown('<div class="no-diff-message">This is the first version. No previous version to compare with.</div>', unsafe_allow_html=True)
+                        if st.session_state.global_view_mode == "code":
+                            st.text_area("", value=xaml_content, height=600, key=f"xaml_{i}", disabled=True)
+                        else:
+                            html_content = render_xaml_visualization(xaml_content)
+                            components.html(html_content, height=600, scrolling=True)
+                    elif getattr(st.session_state, 'code_diff', None):
+                        # Extract this file's diff if available
+                        if f'<div class="diff-file-header">{file_name}' in st.session_state.code_diff:
+                            # Extract this file's diff using regex
+                            file_diff_pattern = f'<div class="diff-file-header">{re.escape(file_name)}.*?(?=<div class="diff-file-header">|$)'
+                            file_diff_match = re.search(file_diff_pattern, st.session_state.code_diff, re.DOTALL)
+                            
+                            if file_diff_match:
+                                file_diff = file_diff_match.group(0)
+                                st.markdown(file_diff, unsafe_allow_html=True)
+                                continue
+                        
+                        # If no diff found for this file
+                        st.markdown('<div class="no-diff-message">No changes detected in this file.</div>', unsafe_allow_html=True)
+                        if st.session_state.global_view_mode == "code":
+                            st.text_area("", value=xaml_content, height=600, key=f"xaml_{i}", disabled=True)
+                        else:
+                            html_content = render_xaml_visualization(xaml_content)
+                            components.html(html_content, height=600, scrolling=True)
                 else:
-                    html_content = render_xaml_visualization(xaml_content)
-                    components.html(html_content, height=650, scrolling=True)
+                    # Normal view mode
+                    if st.session_state.global_view_mode == "code":
+                        # Add code editing buttons
+                        edit_code_col1, edit_code_col2 = st.columns(2)
+                        
+                        with edit_code_col1:
+                            if st.button("✏️ Edit Code", key=f"toggle_code_edit_{i}"):
+                                toggle_code_editing(i)
+                                st.rerun()
+                        
+                        is_editing = st.session_state.editing_code.get(i, False)
+                        
+                        # Show editable or read-only text area based on editing mode
+                        if is_editing:
+                            st.text_area(
+                                "",
+                                value=xaml_content,
+                                height=600,
+                                key=f"edited_xaml_{i}",
+                                disabled=False
+                            )
+                            
+                            with edit_code_col2:
+                                if st.button("💾 Save Code", key=f"save_code_edit_{i}"):
+                                    save_code_edits(i)
+                        else:
+                            st.text_area(
+                                "",
+                                value=xaml_content,
+                                height=600,
+                                key=f"xaml_{i}",
+                                disabled=True
+                            )
+                    else:
+                        html_content = render_xaml_visualization(xaml_content)
+                        components.html(html_content, height=650, scrolling=True)
         
         st.markdown('''</div>''', unsafe_allow_html=True)
 
 if not st.session_state.initialized:
-    st.title("LLM4Reuse")
     uploaded_files = st.file_uploader("Upload XAML files", accept_multiple_files=True, type=['xaml'])
 
     if uploaded_files:
@@ -696,6 +1090,10 @@ if not st.session_state.initialized:
         st.session_state.files = new_files
         st.session_state.documentation = generate_combined_docs(new_files)
         st.session_state.initialized = True
+        
+        # Create initial version
+        save_version()
+        
         loading_indicator.empty()
         st.rerun()
 else:
