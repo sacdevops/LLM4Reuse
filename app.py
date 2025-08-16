@@ -18,15 +18,15 @@ st.set_page_config(page_title="LLM4Reuse", layout="wide", initial_sidebar_state=
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_FOLDER = os.path.join(BASE_DIR, "temp_uploads")
 
-if not all(key in st.secrets for key in ['OPENAI_API_KEY', 'MODEL_NAME', 'MAX_TOKENS', 'TEMPERATURE']):
-    st.error("Missing required configuration in secrets.toml!")
+if not st.secrets['OPENAI_API_KEY']:
+    st.error("Missing required API key in secrets.toml!")
     st.stop()
 
 openai.api_key = st.secrets['OPENAI_API_KEY']
 MODEL_CONFIG = {
-    'model': st.secrets['MODEL_NAME'],
-    'max_tokens': st.secrets['MAX_TOKENS'],
-    'temperature': st.secrets['TEMPERATURE']
+    'model': "gpt-5",
+    'max_tokens': 100000,
+    'temperature': 0.1
 }
 
 if 'files' not in st.session_state:
